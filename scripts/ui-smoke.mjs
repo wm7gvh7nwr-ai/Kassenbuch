@@ -230,6 +230,36 @@ try {
   await page.waitForSelector('.available');
   check('Backup-Datum bleibt gespeichert', !(await page.$('.banner')));
 
+  // ---- Etappe 4: Offline und Hinweis ----
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await page.reload();
+  await page.waitForSelector('.available');
+  check('Service Worker steuert die Seite', await page.evaluate(() => !!navigator.serviceWorker.controller));
+  await page.setOfflineMode(true);
+  await page.reload();
+  await page.waitForSelector('.available', { timeout: 5000 }).catch(() => null);
+  check('Startet offline mit allen Daten', (await page.$('.available')) !== null && (await text('.available')) === 'CHF 686.50');
+  await page.click('.fab');
+  await sleep(350);
+  await tapKeys('5');
+  await page.click('.sheet .btn.primary');
+  await sleep(450);
+  check('Erfassen offline', (await text('.available')) === 'CHF 681.50');
+  await page.setOfflineMode(false);
+
+  const ios = await browser.newPage();
+  await ios.setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Mobile/15E148 Safari/604.1');
+  await ios.setViewport({ width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  ios.on('pageerror', (e) => errors.push(e.message));
+  await ios.goto(`http://localhost:${PORT}/`);
+  await ios.waitForSelector('.install');
+  if (shots) await ios.screenshot({ path: `${shots}/11-hinweis.png` });
+  check('iPhone in Safari: Hinweis zum Home-Bildschirm', (await ios.$eval('.install h1', (e) => e.textContent)) === 'Kassenbuch');
+  await ios.click('.install .btn');
+  await ios.waitForSelector('.available');
+  check('«Trotzdem in Safari» öffnet die App', true);
+  await ios.close();
+
   check('Keine Fehler im Browser', errors.length === 0, errors.join(' | '));
 } finally {
   await browser.close();
