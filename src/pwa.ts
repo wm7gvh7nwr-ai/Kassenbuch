@@ -4,7 +4,14 @@ import { toast } from './ui/sheet';
 export function registerServiceWorker(): void {
   if (!import.meta.env.PROD || !('serviceWorker' in navigator)) return;
   let reloading = false;
+  // Beim allerersten Besuch übernimmt der Service Worker die Seite ohne Neuladen.
+  // Neu geladen wird nur, wenn eine neue Version eine alte ablöst.
+  let hadController = navigator.serviceWorker.controller !== null;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController) {
+      hadController = true;
+      return;
+    }
     if (reloading) return;
     reloading = true;
     location.reload();
