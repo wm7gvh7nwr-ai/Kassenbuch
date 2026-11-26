@@ -52,8 +52,11 @@ function serviceWorker(): Plugin {
       for (const f of publicFiles) hash.update(readFileSync(`public/${f}`));
       const version = hash.digest('hex').slice(0, 12);
       const assets = ['./', ...files.map((f) => `./${f}`), ...publicFiles.map((f) => `./${f}`)];
+      const entry = files.find((f) => f.startsWith('assets/index-') && f.endsWith('.js'));
+      if (!entry) throw new Error('Einstiegsdatei nicht gefunden');
       const code = readFileSync('src/sw-template.js', 'utf8')
         .replace('__VERSION__', version)
+        .replace('__ENTRY__', entry)
         .replace('__ASSETS__', JSON.stringify(assets, null, 2));
       this.emitFile({ type: 'asset', fileName: 'sw.js', source: code });
     },

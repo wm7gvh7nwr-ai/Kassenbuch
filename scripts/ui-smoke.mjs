@@ -1,6 +1,6 @@
 // Browser-Durchlauf in iPhone-Grösse gegen den fertigen Build (vite preview).
 // Aufruf: npm run build && node scripts/ui-smoke.mjs
-import { spawn } from 'node:child_process';
+import { execSync, spawn } from 'node:child_process';
 import puppeteer from 'puppeteer-core';
 import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -333,6 +333,41 @@ try {
   await page.reload();
   await page.waitForSelector('.available');
   check('Töpfe bleiben nach Neuladen', (await potRow('Freizeit')) === '10.00 / 10.00');
+
+  // ---- Update auf eine neue Version (wie nach einem Deploy) ----
+  const swVersion = () => page.evaluate(async () => (await (await fetch('./sw.js', { cache: 'no-store' })).text()).match(/VERSION = '(\w+)'/)[1]);
+  const v1 = await swVersion();
+  const css = readFileSync('src/styles.css', 'utf8');
+  try {
+    writeFileSync('src/styles.css', css + '\n.smoke-update { order: 1; }\n');
+    execSync('node node_modules/vite/bin/vite.js build', { stdio: 'ignore' });
+  } finally {
+    writeFileSync('src/styles.css', css);
+  }
+  const v2 = await swVersion();
+  await page.evaluate(async () => (await navigator.serviceWorker.getRegistration()).update());
+  let waiting = false;
+  for (let i = 0; i < 80 && !waiting; i++) {
+    await sleep(100);
+    waiting = await page.evaluate(async () => !!(await navigator.serviceWorker.getRegistration()).waiting);
+  }
+  check('Neue Version wartet im Hintergrund', v1 !== v2 && waiting, `${v1} → ${v2}`);
+  // Eine zweite Seite, die jetzt öffnet, bekommt noch die alte Version vollständig
+  const p2 = await browser.newPage();
+  await p2.goto(`http://localhost:${PORT}/`);
+  check('Während des Updates geöffnete Seite startet', !!(await p2.waitForSelector('.available', { timeout: 5000 }).catch(() => null)));
+  await p2.close();
+  await sleep(300);
+  check('Hinweis «Neue Version bereit»', (await page.$('.toast')) !== null && (await text('.toast')).includes('Neue Version'));
+  await Promise.all([page.waitForNavigation(), page.click('.toast button')]);
+  await page.waitForSelector('.available', { timeout: 5000 }).catch(() => null);
+  check('Nach «Laden» startet die App', (await page.$('.available')) !== null && (await potRow('Freizeit')) === '10.00 / 10.00');
+  await page.setOfflineMode(true);
+  await page.reload();
+  await page.waitForSelector('.available', { timeout: 5000 }).catch(() => null);
+  check('Neue Version startet offline', (await page.$('.available')) !== null);
+  await page.setOfflineMode(false);
+  execSync('node node_modules/vite/bin/vite.js build', { stdio: 'ignore' });
 
   const ios = await browser.newPage();
   await ios.setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Mobile/15E148 Safari/604.1');

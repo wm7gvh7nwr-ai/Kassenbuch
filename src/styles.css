@@ -263,3 +263,5 @@ button:focus-visible, input:focus-visible { outline: 3px solid color-mix(in srgb
 
 /* Gleicher Abstand Überschrift → Liste wie bei «Buchungen» (dort sorgt .app für den Abstand) */
 .pot-group { display: flex; flex-direction: column; gap: 12px; }
+
+.boot { margin: 30vh 24px 0; text-align: center; color: var(--muted); }

@@ -4,16 +4,49 @@
 const VERSION = '__VERSION__';
 const CACHE = `kassenbuch-${VERSION}`;
 const ASSETS = __ASSETS__;
+const ENTRY = '__ENTRY__';
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)));
+  event.waitUntil(
+    (async () => {
+      const cache = await caches.open(CACHE);
+      try {
+        // Immer frisch vom Server holen, nie aus dem Zwischenspeicher des Browsers.
+        // Sonst könnte eine alte Seite mit neuen Dateien gemischt werden.
+        await Promise.all(
+          ASSETS.map(async (url) => {
+            const res = await fetch(url, { cache: 'reload' });
+            if (!res.ok) throw new Error(`${url}: ${res.status}`);
+            await cache.put(url, res);
+          }),
+        );
+        // Passt die Seite zu den Dateien dieser Version? Sonst abbrechen: die alte Version bleibt.
+        const page = await cache.match('./index.html');
+        if (!page || !(await page.text()).includes(ENTRY)) throw new Error('index.html passt nicht zu dieser Version');
+      } catch (e) {
+        await caches.delete(CACHE);
+        throw e;
+      }
+      // Kein sofortiges Übernehmen: eine Seite, die gerade lädt, würde sonst ihre
+      // Dateien verlieren. Die neue Version wartet, bis man «Laden» tippt oder die App schliesst.
+    })(),
+  );
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
+      // Die vorherige Version bleibt erhalten: eine Seite, die gerade noch mit ihr
+      // lädt, findet ihre Dateien weiterhin. Ältere Versionen werden gelöscht.
+      const meta = await caches.open('kassenbuch-meta');
+      const saved = await meta.match('./versions');
+      const versions = saved ? await saved.json() : [];
+      const keep = [...versions.filter((v) => v !== CACHE).slice(-1), CACHE];
+      await meta.put('./versions', new Response(JSON.stringify(keep)));
       const keys = await caches.keys();
-      await Promise.all(keys.filter((k) => k.startsWith('kassenbuch-') && k !== CACHE).map((k) => caches.delete(k)));
+      await Promise.all(
+        keys.filter((k) => k.startsWith('kassenbuch-') && k !== 'kassenbuch-meta' && !keep.includes(k)).map((k) => caches.delete(k)),
+      );
       await self.clients.claim();
     })(),
   );
@@ -35,7 +68,8 @@ self.addEventListener('fetch', (event) => {
         // App-Seite immer aus dem Gerät: startet auch im Flugmodus
         return (await cache.match('./index.html')) ?? (await cache.match('./')) ?? fetch(req);
       }
-      return (await cache.match(req, { ignoreSearch: true })) ?? fetch(req);
+      // Zuerst diese Version, dann die vorherige, erst dann das Netz
+      return (await cache.match(req, { ignoreSearch: true, ignoreVary: true })) ?? (await caches.match(req, { ignoreSearch: true, ignoreVary: true })) ?? fetch(req);
     })(),
   );
 });
