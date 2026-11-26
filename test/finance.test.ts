@@ -41,6 +41,17 @@ describe('Budget pro Monat', () => {
     expect(next).toHaveLength(2);
   });
 
+  it('erstes Budget im selben Monat ändern: frühere Monate behalten das alte', () => {
+    const first = setBudget([], '2026-11', 180000);
+    const next = setBudget(first, '2026-11', 200000);
+    expect(budgetFor(next, '2026-10')).toBe(180000);
+    expect(budgetFor(next, '2026-11')).toBe(200000);
+    // nochmals ändern: Oktober bleibt bei 1800
+    expect(budgetFor(setBudget(next, '2026-11', 150000), '2026-10')).toBe(180000);
+    // gleicher Betrag: nichts ändert sich
+    expect(setBudget(first, '2026-11', 180000)).toEqual(first);
+  });
+
   it('erstes Budget', () => {
     expect(setBudget([], '2026-11', 180000)).toEqual([{ from: '2026-11', amount: 180000 }]);
   });

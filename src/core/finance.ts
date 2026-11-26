@@ -1,6 +1,9 @@
 import { addMonths, dateInMonth, dayOf, monthOf, type IsoDate, type Month } from './dates';
 import type { Budget, Entry } from './model';
 
+/** Frühester Monat, den die App kennt */
+export const EARLIEST: Month = '2000-01';
+
 /**
  * Budget eines Monats: der letzte Eintrag mit from ≤ Monat.
  * Liegt der Monat vor dem ersten Budget, gilt das erste Budget
@@ -21,6 +24,11 @@ export function budgetFor(budgets: readonly Budget[], month: Month): number | nu
 export function setBudget(budgets: readonly Budget[], from: Month, amount: number): Budget[] {
   if (!Number.isInteger(amount) || amount < 0) throw new RangeError('Budget muss ≥ 0 Rappen sein');
   const rest = budgets.filter((b) => b.from < from);
+  // Gab es vor diesem Monat noch keinen Eintrag, galt dort stillschweigend das erste
+  // Budget. Damit frühere Monate es behalten, wird es ab Anfang festgehalten.
+  const sorted = [...budgets].sort((a, b) => a.from.localeCompare(b.from));
+  const first = sorted[0];
+  if (rest.length === 0 && first && first.amount !== amount) rest.push({ from: EARLIEST, amount: first.amount });
   const next = [...rest, { from, amount }].sort((a, b) => a.from.localeCompare(b.from));
   // Ein gleich hohes Budget direkt danach ist überflüssig
   return next.filter((b, i) => i === 0 || b.amount !== next[i - 1]!.amount);
