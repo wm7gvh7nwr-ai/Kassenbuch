@@ -295,6 +295,12 @@ try {
   await page.keyboard.press('Escape');
   await sleep(400);
   await shot('14-toepfe');
+  const gaps = await page.evaluate(() => {
+    const gap = (title, box) => Math.round(box.getBoundingClientRect().top - title.getBoundingClientRect().bottom);
+    const titles = [...document.querySelectorAll('.section-title')];
+    return [gap(titles[0], document.querySelector('.pots')), gap(titles[1], document.querySelector('.rows'))];
+  });
+  check('Gleicher Abstand bei «Töpfe» und «Buchungen»', gaps[0] === gaps[1], gaps.join(' vs '));
 
   // Filter
   await page.evaluate(() => [...document.querySelectorAll('.pot-btn')].find((x) => x.textContent.includes('Essen')).click());

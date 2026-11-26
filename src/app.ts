@@ -220,7 +220,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
         ));
     });
     if (canAdd) items.push(h('li', null, h('button', { class: 'pot-add', type: 'button', onclick: newPot }, icon(ICONS.plus), 'Topf')));
-    return h('div', null, h('h2', { class: 'section-title pots-title' }, 'Töpfe · übrig'), h('ul', { class: 'pots' }, ...items));
+    return h('div', { class: 'pot-group' }, h('h2', { class: 'section-title' }, 'Töpfe · übrig'), h('ul', { class: 'pots' }, ...items));
   }
 
   function row(entry: Entry): HTMLElement {
