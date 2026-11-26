@@ -1,5 +1,6 @@
 import { isValidDate, isValidMonth } from './dates';
-import { CATEGORY_MAX, NOTE_MAX, SCHEMA_VERSION, type Budget, type Data, type Entry } from './model';
+import { NOTE_MAX, SCHEMA_VERSION, type Budget, type Data, type Entry, type Pot, type PotBudget } from './model';
+import { POT_COLORS, POT_MAX, POT_NAME_MAX } from './pots';
 import { MAX_AMOUNT } from './money';
 
 export const APP_ID = 'kassenbuch';
@@ -12,6 +13,8 @@ export interface BackupFile {
   exportedAt: string;
   entries: Entry[];
   budgets: Budget[];
+  pots: Pot[];
+  potBudgets: PotBudget[];
 }
 
 export function createBackup(data: Data, now: Date = new Date()): BackupFile {
@@ -22,6 +25,8 @@ export function createBackup(data: Data, now: Date = new Date()): BackupFile {
     // Felder explizit kopieren: nichts Unerwartetes landet in der Datei
     entries: data.entries.map(pickEntry),
     budgets: data.budgets.map((b) => ({ from: b.from, amount: b.amount })),
+    pots: data.pots.map((p) => ({ id: p.id, name: p.name, color: p.color, archived: p.archived, createdAt: p.createdAt })),
+    potBudgets: data.potBudgets.map((b) => ({ potId: b.potId, from: b.from, amount: b.amount })),
   };
 }
 
@@ -83,6 +88,42 @@ export function parseBackup(text: string): ParseResult {
   if (!Array.isArray(raw.entries) || !Array.isArray(raw.budgets)) return fail('Der Datei fehlen Buchungen oder Budgets.');
   if (raw.entries.length > MAX_ENTRIES) return fail('Die Datei enthält zu viele Buchungen.');
 
+  // Töpfe (ab Version 2). Ältere Backups haben keine: alle Buchungen sind dann ohne Topf.
+  const pots: Pot[] = [];
+  const potBudgets: PotBudget[] = [];
+  if (raw.version >= 2) {
+    if (!Array.isArray(raw.pots) || !Array.isArray(raw.potBudgets)) return fail('Der Datei fehlen die Töpfe.');
+    if (raw.pots.length > 100) return fail('Die Datei enthält zu viele Töpfe.');
+    const potIds = new Set<string>();
+    for (let i = 0; i < raw.pots.length; i++) {
+      const p = raw.pots[i];
+      const where = `Topf ${i + 1}`;
+      if (!isObj(p) || typeof p.id !== 'string' || !ID_RE.test(p.id) || potIds.has(p.id)) return fail(`${where}: ungültige Kennung.`);
+      if (typeof p.name !== 'string' || p.name.trim() === '' || Array.from(p.name).length > POT_NAME_MAX || /[\u0000-\u001f\u007f]/.test(p.name))
+        return fail(`${where}: ungültiger Name.`);
+      if (typeof p.color !== 'number' || !Number.isInteger(p.color) || p.color < 0 || p.color >= POT_COLORS) return fail(`${where}: ungültige Farbe.`);
+      if (typeof p.archived !== 'boolean') return fail(`${where}: ungültiger Zustand.`);
+      if (typeof p.createdAt !== 'string' || !ISO_TS_RE.test(p.createdAt)) return fail(`${where}: ungültige Zeitangabe.`);
+      potIds.add(p.id);
+      pots.push({ id: p.id, name: p.name, color: p.color, archived: p.archived, createdAt: p.createdAt });
+    }
+    if (pots.filter((p) => !p.archived).length > POT_MAX) return fail('Die Datei enthält zu viele Töpfe.');
+    const seen = new Set<string>();
+    for (let i = 0; i < raw.potBudgets.length; i++) {
+      const b = raw.potBudgets[i];
+      const where = `Topf-Betrag ${i + 1}`;
+      if (!isObj(b) || typeof b.potId !== 'string' || !potIds.has(b.potId)) return fail(`${where}: unbekannter Topf.`);
+      if (!isValidMonth(b.from)) return fail(`${where}: ungültiger Monat.`);
+      const key = `${b.potId}|${b.from}`;
+      if (seen.has(key)) return fail(`${where}: Monat doppelt.`);
+      if (typeof b.amount !== 'number' || !Number.isInteger(b.amount) || b.amount < 0 || b.amount > MAX_AMOUNT)
+        return fail(`${where}: ungültiger Betrag.`);
+      seen.add(key);
+      potBudgets.push({ potId: b.potId, from: b.from, amount: b.amount });
+    }
+  }
+  const potIdSet = new Set(pots.map((p) => p.id));
+
   const entries: Entry[] = [];
   const ids = new Set<string>();
   for (let i = 0; i < raw.entries.length; i++) {
@@ -96,8 +137,9 @@ export function parseBackup(text: string): ParseResult {
       return fail(`${where}: ungültiger Betrag.`);
     if (typeof e.note !== 'string' || Array.from(e.note).length > NOTE_MAX || /[\u0000-\u001f\u007f]/.test(e.note))
       return fail(`${where}: ungültige Notiz.`);
-    if (!(e.category === null || (typeof e.category === 'string' && e.category.length <= CATEGORY_MAX)))
-      return fail(`${where}: ungültige Kategorie.`);
+    if (!(e.category === null || (typeof e.category === 'string' && potIdSet.has(e.category))))
+      return fail(`${where}: unbekannter Topf.`);
+    if (e.category !== null && e.amount > 0) return fail(`${where}: Einnahme mit Topf.`);
     if (typeof e.createdAt !== 'string' || !ISO_TS_RE.test(e.createdAt)) return fail(`${where}: ungültige Zeitangabe.`);
     if (typeof e.updatedAt !== 'string' || !ISO_TS_RE.test(e.updatedAt)) return fail(`${where}: ungültige Zeitangabe.`);
     ids.add(e.id);
@@ -131,7 +173,7 @@ export function parseBackup(text: string): ParseResult {
   const dates = entries.map((e) => e.date).sort();
   return {
     ok: true,
-    data: { entries, budgets },
+    data: { entries, budgets, pots, potBudgets },
     info: {
       entries: entries.length,
       firstDate: dates[0] ?? null,

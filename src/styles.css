@@ -226,3 +226,37 @@ button:focus-visible, input:focus-visible { outline: 3px solid color-mix(in srgb
 .steps li { display: flex; gap: 12px; align-items: center; padding: 12px 16px; }
 .steps li + li { border-top: 1px solid var(--line); }
 .step-n { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--blue); color: #fff; font-size: 14px; font-weight: 700; flex: none; }
+
+/* Töpfe */
+:root { --p0: #ff9500; --p1: #34c759; --p2: #5856d6; --p3: #ff2d55; --p4: #00c7be; --p5: #af52de; --p6: #a2845e; --p7: #0a7aff; }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--muted); }
+.c0 { background: var(--p0); } .c1 { background: var(--p1); } .c2 { background: var(--p2); } .c3 { background: var(--p3); }
+.c4 { background: var(--p4); } .c5 { background: var(--p5); } .c6 { background: var(--p6); } .c7 { background: var(--p7); }
+.chips { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 4px; margin: 0 -2px; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.chips[hidden] { display: none; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px; flex: none; border: 1.5px solid var(--line); background: var(--card);
+  border-radius: 999px; padding: 7px 13px; font-size: 15px; cursor: pointer; white-space: nowrap;
+}
+.chip[aria-checked='true'] { border-color: var(--blue); background: color-mix(in srgb, var(--blue) 12%, var(--card)); font-weight: 600; }
+.pots { list-style: none; margin: 0; padding: 0; background: var(--card); border-radius: 16px; overflow: hidden; box-shadow: var(--shadow); }
+.pots li + li { border-top: 1px solid var(--line); }
+.pot-btn {
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 4px 10px; width: 100%;
+  padding: 11px 16px; border: 0; background: transparent; text-align: left; cursor: pointer;
+}
+.pot-btn:active { background: color-mix(in srgb, var(--soft) 60%, var(--card)); }
+.pot-name { font-weight: 500; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pot-left { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.pot-left small { font-weight: 400; color: var(--muted); font-size: 13px; }
+.pot-btn.over .pot-left { color: var(--red); }
+.pot-btn .mini { grid-column: 2 / 4; height: 5px; border-radius: 3px; background: var(--soft); overflow: hidden; }
+.pot-btn .mini i { display: block; height: 100%; border-radius: 3px; background: var(--green-bar); }
+.pot-btn.warn .mini i { background: var(--orange-bar); }
+.pot-btn.over .mini i { background: var(--red-bar); }
+.pot-add { display: flex; align-items: center; gap: 8px; width: 100%; padding: 12px 16px; border: 0; background: transparent; color: var(--blue); font-size: 16px; cursor: pointer; }
+.pot-add-solo { background: var(--card); border-radius: 16px; box-shadow: var(--shadow); }
+.filter { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 0; padding: 8px 12px; border-radius: 12px; background: color-mix(in srgb, var(--blue) 10%, var(--card)); font-size: 15px; }
+.filter button { border: 0; background: transparent; color: var(--blue); font-weight: 600; cursor: pointer; padding: 4px 6px; }
+.row-sub .dot { width: 8px; height: 8px; margin: 0 4px 1px 0; vertical-align: middle; }

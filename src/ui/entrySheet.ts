@@ -1,5 +1,5 @@
 import { keypadDisplay, pressKey, type Key } from '../core/keypad';
-import { cleanNote, NOTE_MAX, validateInput, type Entry, type EntryInput } from '../core/model';
+import { cleanNote, NOTE_MAX, validateInput, type Entry, type EntryInput, type Pot } from '../core/model';
 import { parseAmount, toInputString } from '../core/money';
 import { h, icon, ICONS } from './dom';
 import { openSheet } from './sheet';
@@ -10,6 +10,8 @@ export interface EntrySheetOptions {
   entry?: Entry;
   defaultDate: string;
   submitLabel: string;
+  /** Töpfe zur Auswahl (aktive, plus ein gelöschter, falls die Buchung ihn hat) */
+  pots: Pot[];
   onSubmit: (input: EntryInput) => Promise<void>;
   onDelete?: () => void;
 }
@@ -18,12 +20,27 @@ export interface EntrySheetOptions {
 export function openEntrySheet(o: EntrySheetOptions): void {
   let kind: EntryInput['kind'] = o.entry ? (o.entry.amount < 0 ? 'expense' : 'income') : 'expense';
   let value = o.entry ? toInputString(o.entry.amount) : '';
+  let category: string | null = o.entry?.category ?? null;
 
   openSheet(o.title, (body, close) => {
     const segExpense = h('button', { type: 'button', role: 'tab' }, 'Ausgabe');
     const segIncome = h('button', { type: 'button', role: 'tab' }, 'Einnahme');
     const seg = h('div', { class: 'seg', role: 'tablist', 'aria-label': 'Art' }, segExpense, segIncome);
     const amount = h('output', { class: 'entry-amount', 'aria-live': 'polite' });
+    // Töpfe als Knöpfe in einer Reihe; «Ohne» ist vorgewählt
+    const chipBtns: HTMLButtonElement[] = [];
+    const chips = h('div', { class: 'chips', role: 'radiogroup', 'aria-label': 'Topf' });
+    const addChip = (id: string | null, label: string, color: number | null) => {
+      const b = h('button', { type: 'button', class: 'chip', role: 'radio', 'data-pot': id ?? '' },
+        color !== null ? h('span', { class: `dot c${color}`, 'aria-hidden': 'true' }) : null, label);
+      b.addEventListener('click', () => ((category = id), render()));
+      chipBtns.push(b);
+      chips.append(b);
+    };
+    if (o.pots.length) {
+      addChip(null, 'Ohne', null);
+      for (const p of o.pots) addChip(p.id, p.name, p.color);
+    }
     const note = h('input', {
       class: 'input',
       type: 'text',
@@ -44,6 +61,8 @@ export function openEntrySheet(o: EntrySheetOptions): void {
       segIncome.setAttribute('aria-selected', String(kind === 'income'));
       amount.textContent = `CHF ${keypadDisplay(value)}`;
       amount.classList.toggle('income', kind === 'income');
+      chips.hidden = kind === 'income' || o.pots.length === 0;
+      for (const b of chipBtns) b.setAttribute('aria-checked', String((b.dataset.pot || null) === category));
       submit.toggleAttribute('disabled', !parseAmount(value));
     };
     segExpense.addEventListener('click', () => ((kind = 'expense'), render()));
@@ -73,7 +92,10 @@ export function openEntrySheet(o: EntrySheetOptions): void {
     }
 
     submit.addEventListener('click', async () => {
-      const input: EntryInput = { kind, value: parseAmount(value) ?? 0, note: cleanNote(note.value), date: date.value };
+      const input: EntryInput = {
+        kind, value: parseAmount(value) ?? 0, note: cleanNote(note.value), date: date.value,
+        category: kind === 'expense' ? category : null,
+      };
       const problem = validateInput(input);
       if (problem) {
         error.textContent = problem;
@@ -96,6 +118,7 @@ export function openEntrySheet(o: EntrySheetOptions): void {
     body.append(
       seg,
       amount,
+      chips,
       h('div', { class: 'entry-fields' }, note, date),
       pad,
       error,

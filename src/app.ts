@@ -1,6 +1,8 @@
 import { addMonths, dateInMonth, monthLabel, monthName, monthOf, shortDate, today, type Month } from './core/dates';
 import { budgetFor, compare, entriesOf, hasEntriesIn, setBudget, summarize } from './core/finance';
-import { changeEntry, makeEntry, type Budget, type Entry } from './core/model';
+import { changeEntry, makeEntry, type Budget, type Data, type Entry, type Pot, type PotBudget } from './core/model';
+import { activePots, addPot, potBudgetFor, potBudgetTotal, potById, potSummaries, removePot, updatePot, validatePot, POT_MAX } from './core/pots';
+import { openPotSheet } from './ui/potSheet';
 import { formatChf } from './core/money';
 import * as db from './storage/db';
 import { openBudgetSheet } from './ui/budgetSheet';
@@ -13,15 +15,20 @@ import { backupDue } from './core/backup';
 interface State {
   entries: Entry[];
   budgets: Budget[];
+  pots: Pot[];
+  potBudgets: PotBudget[];
   lastBackupAt: string | null;
   month: Month;
   today: string;
+  /** Nur Buchungen dieses Topfs zeigen */
+  filterPot: string | null;
 }
 
 export async function startApp(root: HTMLElement): Promise<void> {
   const loaded = await db.loadAll();
   const t = today();
-  const state: State = { ...loaded, today: t, month: monthOf(t) };
+  const state: State = { ...loaded, today: t, month: monthOf(t), filterPot: null };
+  const data = (): Data => ({ entries: state.entries, budgets: state.budgets, pots: state.pots, potBudgets: state.potBudgets });
 
   const view = h('main', { class: 'app' });
   const fab = h('button', { class: 'fab', type: 'button' }, icon(ICONS.plus), h('span', null, 'Erfassen'));
@@ -38,6 +45,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
       title: 'Erfassen',
       defaultDate: defaultDate(),
       submitLabel: 'Hinzufügen',
+      pots: activePots(state.pots),
       onSubmit: async (input) => {
         const entry = makeEntry(input, crypto.randomUUID(), new Date());
         await db.putEntry(entry);
@@ -56,6 +64,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
       entry,
       defaultDate: entry.date,
       submitLabel: 'Speichern',
+      pots: state.pots.filter((p) => !p.archived || p.id === entry.category),
       onSubmit: async (input) => {
         const next = changeEntry(entry, input, new Date());
         await db.putEntry(next);
@@ -97,7 +106,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
 
   function showSettings(): void {
     openSettings({
-      data: () => ({ entries: state.entries, budgets: state.budgets }),
+      data,
       budget: budgetFor(state.budgets, currentMonth()),
       lastBackupAt: state.lastBackupAt,
       editBudget: () => editBudget(),
@@ -110,6 +119,9 @@ export async function startApp(root: HTMLElement): Promise<void> {
         await db.replaceAll(data);
         state.entries = data.entries;
         state.budgets = data.budgets;
+        state.pots = data.pots;
+        state.potBudgets = data.potBudgets;
+        state.filterPot = null;
         state.month = currentMonth();
         render();
       },
@@ -117,6 +129,9 @@ export async function startApp(root: HTMLElement): Promise<void> {
         await db.clearAll();
         state.entries = [];
         state.budgets = [];
+        state.pots = [];
+        state.potBudgets = [];
+        state.filterPot = null;
         state.lastBackupAt = null;
         state.month = currentMonth();
         render();
@@ -125,15 +140,101 @@ export async function startApp(root: HTMLElement): Promise<void> {
     });
   }
 
+  function newPot(): void {
+    const month = currentMonth();
+    openPotSheet({
+      amount: null,
+      monthLabel: monthLabel(month),
+      otherPotsTotal: potBudgetTotal(state.pots, state.potBudgets, month),
+      totalBudget: budgetFor(state.budgets, month),
+      validate: (name, amount) => validatePot(state.pots, { name, amount }),
+      onSave: async (name, amount) => {
+        const r = addPot(state.pots, state.potBudgets, { name, amount }, crypto.randomUUID(), month, new Date());
+        await db.savePots(r.pots, r.potBudgets);
+        state.pots = r.pots;
+        state.potBudgets = r.potBudgets;
+        render();
+      },
+    });
+  }
+
+  function editPot(pot: Pot): void {
+    const month = currentMonth();
+    const own = potBudgetFor(state.potBudgets, pot.id, month);
+    const showEntries = () => {
+      state.filterPot = pot.id;
+      render();
+      view.querySelector('.section-title')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    };
+    if (pot.archived) {
+      showEntries();
+      return;
+    }
+    openPotSheet({
+      pot,
+      amount: own,
+      monthLabel: monthLabel(month),
+      otherPotsTotal: potBudgetTotal(state.pots, state.potBudgets, month) - own,
+      totalBudget: budgetFor(state.budgets, month),
+      validate: (name, amount) => validatePot(state.pots, { name, amount }, pot.id),
+      onSave: async (name, amount) => {
+        const r = updatePot(state.pots, state.potBudgets, pot.id, { name, amount }, month);
+        await db.savePots(r.pots, r.potBudgets);
+        state.pots = r.pots;
+        state.potBudgets = r.potBudgets;
+        render();
+      },
+      onShowEntries: showEntries,
+      onDelete: async () => {
+        const r = removePot(state.pots, state.potBudgets, state.entries, pot.id);
+        await db.savePots(r.pots, r.potBudgets);
+        state.pots = r.pots;
+        state.potBudgets = r.potBudgets;
+        if (state.filterPot === pot.id) state.filterPot = null;
+        render();
+        toast(`Topf «${pot.name}» gelöscht`);
+      },
+    });
+  }
+
+  function potSection(isCurrent: boolean): HTMLElement | null {
+    const list = potSummaries(state.entries, state.pots, state.potBudgets, state.month);
+    const canAdd = isCurrent && activePots(state.pots).length < POT_MAX;
+    if (list.length === 0) {
+      return canAdd
+        ? h('button', { class: 'pot-add pot-add-solo', type: 'button', onclick: newPot }, icon(ICONS.plus), 'Topf hinzufügen, z. B. «Essen»')
+        : null;
+    }
+    const items = list.map((p) => {
+      const pct = p.budget > 0 ? Math.min(100, (p.spent / p.budget) * 100) : p.spent > 0 ? 100 : 0;
+      return h('li', null,
+        h('button', {
+          class: `pot-btn ${p.level}`, type: 'button', 'data-pot': p.pot.id,
+          'aria-label': `${p.pot.name}: noch ${formatChf(p.available)} von ${formatChf(p.budget)} Franken`,
+          onclick: () => editPot(p.pot),
+        },
+          h('span', { class: `dot c${p.pot.color}`, 'aria-hidden': 'true' }),
+          h('span', { class: 'pot-name' }, p.pot.archived ? `${p.pot.name} (gelöscht)` : p.pot.name),
+          h('span', { class: 'pot-left' }, formatChf(p.available), h('small', null, p.pot.archived ? '' : ` / ${formatChf(p.budget)}`)),
+          h('span', { class: 'mini', 'aria-hidden': 'true' }, barFill(pct)),
+        ));
+    });
+    if (canAdd) items.push(h('li', null, h('button', { class: 'pot-add', type: 'button', onclick: newPot }, icon(ICONS.plus), 'Topf')));
+    return h('div', null, h('h2', { class: 'section-title pots-title' }, 'Töpfe · übrig'), h('ul', { class: 'pots' }, ...items));
+  }
+
   function row(entry: Entry): HTMLElement {
     const isExpense = entry.amount < 0;
+    const pot = potById(state.pots, entry.category);
     const title = entry.note || (isExpense ? 'Ausgabe' : 'Einnahme');
     const inner = h(
       'button',
       { class: 'row-inner', type: 'button', 'aria-label': `${title}, ${shortDate(entry.date)}, ${formatChf(entry.amount, { sign: true })} Franken. Antippen zum Ändern.` },
       h('span', { class: 'row-main' },
         h('span', { class: 'row-title' }, title),
-        h('span', { class: 'row-sub' }, entry.note ? `${shortDate(entry.date)} · ${isExpense ? 'Ausgabe' : 'Einnahme'}` : shortDate(entry.date)),
+        h('span', { class: 'row-sub' },
+          pot ? h('span', { class: `dot c${pot.color}`, 'aria-hidden': 'true' }) : null,
+          [shortDate(entry.date), pot ? pot.name : entry.note ? (isExpense ? 'Ausgabe' : 'Einnahme') : null].filter(Boolean).join(' · ')),
       ),
       h('span', { class: `row-amount ${isExpense ? '' : 'pos'}` }, formatChf(entry.amount, { sign: true })),
     );
@@ -189,7 +290,8 @@ export async function startApp(root: HTMLElement): Promise<void> {
     const s = summarize(state.entries, state.budgets, state.month);
     const hasBudget = state.budgets.length > 0;
     const isCurrent = state.month === currentMonth();
-    const list = entriesOf(state.entries, state.month);
+    const filter = potById(state.pots, state.filterPot);
+    const list = entriesOf(state.entries, state.month).filter((e) => !filter || e.category === filter.id);
     const cmp = compare(state.entries, state.month, state.today);
     const showCompare = hasEntriesIn(state.entries, cmp.month);
     const pct = s.budget > 0 ? Math.min(100, (s.expenses / s.budget) * 100) : s.expenses > 0 ? 100 : 0;
@@ -206,7 +308,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
       backupDue(state.lastBackupAt, state.entries, new Date()) && h('div', { class: 'banner', role: 'note' },
         h('span', null, h('strong', null, 'Backup fällig'), h('br'), state.lastBackupAt ? 'Das letzte ist über 30 Tage alt.' : 'Sichere deine Buchungen in «Dateien».'),
         h('button', { class: 'btn small', type: 'button', onclick: () => void makeBackup({
-          data: () => ({ entries: state.entries, budgets: state.budgets }),
+          data,
           onBackupDone: async (iso) => { await db.setLastBackup(iso); state.lastBackupAt = iso; render(); },
         }) }, 'Jetzt sichern')),
       h('section', { class: `hero ${s.level}`, 'aria-label': 'Verfügbar' },
@@ -226,10 +328,14 @@ export async function startApp(root: HTMLElement): Promise<void> {
         cmp.uptoDay ? `${monthName(cmp.month)} bis zum ${cmp.uptoDay}.: ` : `Im ${monthName(cmp.month)}: `,
         h('strong', null, `CHF ${formatChf(cmp.expenses)}`),
         ' ausgegeben'),
+      potSection(isCurrent),
       h('h2', { class: 'section-title' }, 'Buchungen'),
+      filter && h('p', { class: 'filter' },
+        h('span', null, 'Nur ', h('strong', null, filter.name)),
+        h('button', { type: 'button', onclick: () => ((state.filterPot = null), render()) }, 'Alle zeigen')),
       list.length
         ? h('ul', { class: 'rows' }, ...list.map(row))
-        : h('p', { class: 'empty' }, isCurrent ? 'Noch keine Buchungen in diesem Monat. Tippe auf «Erfassen».' : 'Keine Buchungen in diesem Monat.'),
+        : h('p', { class: 'empty' }, filter ? `Keine Buchungen in «${filter.name}» in diesem Monat.` : isCurrent ? 'Noch keine Buchungen in diesem Monat. Tippe auf «Erfassen».' : 'Keine Buchungen in diesem Monat.'),
 
     ]);
   }

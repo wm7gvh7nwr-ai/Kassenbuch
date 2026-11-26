@@ -1,19 +1,21 @@
-import type { Entry } from './model';
+import type { Entry, Pot } from './model';
 
 /**
  * CSV für Numbers und Excel (Schweizer Einstellungen): Strichpunkt als
  * Trenner, Punkt als Dezimalzeichen, UTF-8 mit BOM, älteste Buchung zuerst.
  */
-export function toCsv(entries: readonly Entry[]): string {
+export function toCsv(entries: readonly Entry[], pots: readonly Pot[] = []): string {
+  const potName = new Map(pots.map((p) => [p.id, p.name]));
   const rows = [...entries]
     .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt))
     .map((e) => [
       e.date.split('-').reverse().join('.'),
       amountCell(e.amount),
       e.amount < 0 ? 'Ausgabe' : 'Einnahme',
+      e.category ? (potName.get(e.category) ?? '') : '',
       e.note,
     ]);
-  const lines = [['Datum', 'Betrag CHF', 'Art', 'Notiz'], ...rows].map((r) => r.map(cell).join(';'));
+  const lines = [['Datum', 'Betrag CHF', 'Art', 'Topf', 'Notiz'], ...rows].map((r) => r.map(cell).join(';'));
   return '﻿' + lines.join('\r\n') + '\r\n';
 }
 

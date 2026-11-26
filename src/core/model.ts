@@ -1,7 +1,8 @@
 import { isValidDate, type IsoDate, type Month } from './dates';
 import { MAX_AMOUNT } from './money';
 
-export const SCHEMA_VERSION = 1;
+/** 1 = ohne Töpfe, 2 = mit Töpfen */
+export const SCHEMA_VERSION = 2;
 export const NOTE_MAX = 60;
 export const CATEGORY_MAX = 40;
 
@@ -11,7 +12,7 @@ export interface Entry {
   /** Rappen, negativ = Ausgabe, positiv = Einnahme, nie 0 */
   amount: number;
   note: string;
-  /** In Version 1 immer null. Platz für spätere, selbst benannte Kategorien. */
+  /** Kennung des Topfs (nur bei Ausgaben) oder null = ohne Topf */
   category: string | null;
   createdAt: string;
   updatedAt: string;
@@ -24,9 +25,29 @@ export interface Budget {
   amount: number;
 }
 
+/** Ein selbst angelegter Topf, z. B. «Essen». Teil des Gesamtbudgets. */
+export interface Pot {
+  id: string;
+  name: string;
+  /** Farbe 0…7 aus einer festen Palette */
+  color: number;
+  /** Gelöscht: erscheint nicht mehr beim Erfassen, alte Buchungen behalten den Namen */
+  archived: boolean;
+  createdAt: string;
+}
+
+/** Monatsbetrag eines Topfs, gilt ab «from» bis zum nächsten Eintrag */
+export interface PotBudget {
+  potId: string;
+  from: Month;
+  amount: number;
+}
+
 export interface Data {
   entries: Entry[];
   budgets: Budget[];
+  pots: Pot[];
+  potBudgets: PotBudget[];
 }
 
 /** Steuerzeichen und unsichtbare Richtungszeichen (als Zahlen, damit der Quelltext lesbar bleibt) */
@@ -52,6 +73,8 @@ export interface EntryInput {
   value: number;
   kind: 'expense' | 'income';
   note: string;
+  /** Topf-Kennung, nur bei Ausgaben */
+  category?: string | null;
 }
 
 export function validateInput(input: EntryInput): string | null {
@@ -68,7 +91,7 @@ export function makeEntry(input: EntryInput, id: string, now: Date): Entry {
     date: input.date,
     amount: input.kind === 'expense' ? -input.value : input.value,
     note: cleanNote(input.note),
-    category: null,
+    category: input.kind === 'expense' ? (input.category ?? null) : null,
     createdAt: ts,
     updatedAt: ts,
   };
@@ -80,6 +103,7 @@ export function changeEntry(entry: Entry, input: EntryInput, now: Date): Entry {
     date: input.date,
     amount: input.kind === 'expense' ? -input.value : input.value,
     note: cleanNote(input.note),
+    category: input.kind === 'expense' ? (input.category ?? null) : null,
     updatedAt: now.toISOString(),
   };
 }

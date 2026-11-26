@@ -24,7 +24,17 @@ const data: Data = {
     { from: '2026-01', amount: 150000 },
     { from: '2026-11', amount: 180000 },
   ],
+  pots: [
+    { id: 'p0000000-0000-4000-8000-000000000001', name: 'Essen', color: 0, archived: false, createdAt: '2026-01-02T10:00:00.000Z' },
+    { id: 'p0000000-0000-4000-8000-000000000002', name: 'Velo', color: 3, archived: true, createdAt: '2026-02-02T10:00:00.000Z' },
+  ],
+  potBudgets: [
+    { potId: 'p0000000-0000-4000-8000-000000000001', from: '2026-01', amount: 40000 },
+    { potId: 'p0000000-0000-4000-8000-000000000001', from: '2026-11', amount: 45000 },
+    { potId: 'p0000000-0000-4000-8000-000000000002', from: '2026-02', amount: 5000 },
+  ],
 };
+data.entries[0]!.category = 'p0000000-0000-4000-8000-000000000001';
 
 const now = new Date('2026-11-26T20:00:00.000Z');
 
@@ -41,6 +51,8 @@ describe('Backup', () => {
     if (!r.ok) return;
     expect(r.data.entries).toEqual(data.entries);
     expect(r.data.budgets).toEqual(data.budgets);
+    expect(r.data.pots).toEqual(data.pots);
+    expect(r.data.potBudgets).toEqual(data.potBudgets);
     expect(r.info).toEqual({ entries: 3, firstDate: '2026-01-03', lastDate: '2026-11-24', exportedAt: now.toISOString() });
   });
 
@@ -52,7 +64,7 @@ describe('Backup', () => {
   });
 
   it('leeres Kassenbuch', () => {
-    const r = parseBackup(serializeBackup(createBackup({ entries: [], budgets: [] }, now)));
+    const r = parseBackup(serializeBackup(createBackup({ entries: [], budgets: [], pots: [], potBudgets: [] }, now)));
     expect(r).toMatchObject({ ok: true, info: { entries: 0, firstDate: null, lastDate: null } });
   });
 
@@ -65,7 +77,7 @@ describe('Backup', () => {
     ['leer', ''],
     ['Array statt Objekt', '[]'],
     ['falsche App', (o) => (o.app = 'budgetplaner')],
-    ['neuere Version', (o) => (o.version = 2)],
+    ['neuere Version', (o) => (o.version = 3)],
     ['Version 0', (o) => (o.version = 0)],
     ['Version als Text', (o) => (o.version = '1')],
     ['ohne Buchungen', (o) => delete o.entries],
@@ -81,6 +93,17 @@ describe('Backup', () => {
     ['Notiz mit Steuerzeichen', (o) => (o.entries[0].note = 'a\u0000b')],
     ['Notiz als Zahl', (o) => (o.entries[0].note = 5)],
     ['Kategorie als Objekt', (o) => (o.entries[0].category = {})],
+    ['unbekannter Topf', (o) => (o.entries[0].category = 'p0000000-0000-4000-8000-00000000dead')],
+    ['Einnahme mit Topf', (o) => (o.entries[1].category = o.pots[0].id)],
+    ['Töpfe fehlen in Version 2', (o) => delete o.pots],
+    ['Topf ohne Namen', (o) => (o.pots[0].name = '  ')],
+    ['Topf-Name zu lang', (o) => (o.pots[0].name = 'x'.repeat(25))],
+    ['Topf-Farbe ungültig', (o) => (o.pots[0].color = 9)],
+    ['Topf doppelt', (o) => (o.pots[1].id = o.pots[0].id)],
+    ['Topf-Betrag für unbekannten Topf', (o) => (o.potBudgets[0].potId = 'p0000000-0000-4000-8000-00000000dead')],
+    ['Topf-Betrag negativ', (o) => (o.potBudgets[0].amount = -1)],
+    ['Topf-Monat doppelt', (o) => (o.potBudgets[1].from = o.potBudgets[0].from)],
+    ['zu viele aktive Töpfe', (o) => (o.pots = Array.from({ length: 9 }, (_, i) => ({ ...o.pots[0], id: `p0000000-0000-4000-8000-00000000000${i}`, name: 'T' + i })), o.potBudgets = [], o.entries.forEach((e: any) => (e.category = null)))],
     ['Zeitstempel falsch', (o) => (o.entries[0].createdAt = 'gestern')],
     ['Budget negativ', (o) => (o.budgets[0].amount = -1)],
     ['Budget-Monat ungültig', (o) => (o.budgets[0].from = '2026-13')],
@@ -95,6 +118,31 @@ describe('Backup', () => {
     if (!r.ok) expect(r.error.length).toBeGreaterThan(5);
   });
 
+  it('liest Backups aus Version 1 (ohne Töpfe)', () => {
+    const v1 = backupWith((o) => {
+      o.version = 1;
+      delete o.pots;
+      delete o.potBudgets;
+      o.entries.forEach((e: any) => (e.category = null));
+    });
+    const r = parseBackup(v1);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.data.pots).toEqual([]);
+      expect(r.data.potBudgets).toEqual([]);
+      expect(r.data.entries).toHaveLength(3);
+    }
+  });
+
+  it('Version 1 mit Topf-Kennung wird abgelehnt', () => {
+    const v1 = backupWith((o) => {
+      o.version = 1;
+      delete o.pots;
+      delete o.potBudgets;
+    });
+    expect(parseBackup(v1).ok).toBe(false);
+  });
+
   it('lehnt zu grosse Dateien ab, ohne sie zu lesen', () => {
     expect(parseBackup(' '.repeat(10 * 1024 * 1024 + 1)).ok).toBe(false);
   });
@@ -102,14 +150,14 @@ describe('Backup', () => {
 
 describe('CSV-Export', () => {
   it('Kopfzeile, Reihenfolge, Format', () => {
-    const csv = toCsv(data.entries);
+    const csv = toCsv(data.entries, data.pots);
     expect(csv.startsWith('﻿')).toBe(true);
     const lines = csv.slice(1).trimEnd().split('\r\n');
     expect(lines).toEqual([
-      'Datum;Betrag CHF;Art;Notiz',
-      '03.01.2026;2350.00;Einnahme;Lohn «November» ✓',
-      '15.06.2026;-99999.99;Ausgabe;',
-      '24.11.2026;-12.50;Ausgabe;Kaffee',
+      'Datum;Betrag CHF;Art;Topf;Notiz',
+      '03.01.2026;2350.00;Einnahme;;Lohn «November» ✓',
+      '15.06.2026;-99999.99;Ausgabe;;',
+      '24.11.2026;-12.50;Ausgabe;Essen;Kaffee',
     ]);
   });
 

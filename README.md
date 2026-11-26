@@ -27,6 +27,7 @@ npm run build   # statische Dateien in dist/
 - Etappe 2: Startbildschirm und Erfassen ✓
 - Etappe 3: Einstellungen, Backup, CSV ✓
 - Etappe 4: Offline und Veröffentlichen (GitHub Pages) ✓
+- Version 1.1: Töpfe (eigene Unterbudgets, z. B. «Essen») ✓
 
 ## Veröffentlichen
 

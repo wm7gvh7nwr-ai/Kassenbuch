@@ -181,7 +181,7 @@ try {
   await clickItem('Als CSV exportieren');
   const csvPath = await waitFile('.csv');
   const csv = csvPath && readFileSync(csvPath, 'utf8');
-  check('CSV exportiert', !!csv && csv.includes('Datum;Betrag CHF;Art;Notiz') && csv.includes("'<img") === false && csv.includes('-1300.00'), csvPath ?? '');
+  check('CSV exportiert', !!csv && csv.includes('Datum;Betrag CHF;Art;Topf;Notiz') && csv.includes("'<img") === false && csv.includes('-1300.00'), csvPath ?? '');
   page.keyboard.press('Escape');
   await sleep(400);
 
@@ -246,6 +246,87 @@ try {
   await sleep(450);
   check('Erfassen offline', (await text('.available')) === 'CHF 681.50');
   await page.setOfflineMode(false);
+
+  // ---- Töpfe ----
+  const potRow = (name) => page.evaluate((n) => {
+    const b = [...document.querySelectorAll('.pot-btn')].find((x) => x.querySelector('.pot-name').textContent.startsWith(n));
+    return b ? b.querySelector('.pot-left').textContent : null;
+  }, name);
+  check('Ohne Töpfe: Knopf «Topf hinzufügen»', !!(await page.$('.pot-add-solo')));
+  await page.click('.pot-add-solo');
+  await sleep(400);
+  await page.type('.sheet input[type=text]', 'Essen');
+  await tapKeys('400');
+  await shot('12-topf-neu');
+  await page.click('.sheet .btn.primary');
+  await sleep(450);
+  check('Topf angelegt', (await potRow('Essen')) === '400.00 / 400.00', String(await potRow('Essen')));
+  await page.click('.pot-add:not(.pot-add-solo)');
+  await sleep(400);
+  await page.type('.sheet input[type=text]', 'essen');
+  await tapKeys('10');
+  await page.click('.sheet .btn.primary');
+  await sleep(300);
+  check('Doppelter Name abgelehnt', (await text('.sheet .form-error')).includes('schon'));
+  await page.$eval('.sheet input[type=text]', (e) => (e.value = ''));
+  await page.type('.sheet input[type=text]', 'Freizeit');
+  await page.click('.sheet .btn.primary');
+  await sleep(450);
+  check('Zweiter Topf', (await potRow('Freizeit')) === '10.00 / 10.00', String(await potRow('Freizeit')));
+
+  const before = await text('.available');
+  await page.click('.fab');
+  await sleep(350);
+  check('Erfassen zeigt Töpfe, «Ohne» vorgewählt', (await page.$$eval('.sheet .chip', (c) => c.map((x) => x.textContent + ':' + x.getAttribute('aria-checked')))).join(',') === 'Ohne:true,Essen:false,Freizeit:false');
+  await page.evaluate(() => [...document.querySelectorAll('.sheet .chip')].find((c) => c.textContent === 'Essen').click());
+  await tapKeys('34.6');
+  await page.type('.sheet input[type=text]', 'Migros');
+  await shot('13-erfassen-topf');
+  await page.click('.sheet .btn.primary');
+  await sleep(450);
+  check('Topf-Rest sinkt', (await potRow('Essen')) === '365.40 / 400.00', String(await potRow('Essen')));
+  const parse = (t) => Number(t.replace(/[^0-9.−-]/g, '').replace('−', '-'));
+  check('Gesamtbudget sinkt ebenfalls', Math.abs(parse(before) - parse(await text('.available')) - 34.6) < 0.001, `${before} → ${await text('.available')}`);
+  check('Buchung zeigt Topf', (await page.$$eval('.row-sub', (r) => r.map((x) => x.textContent))).some((t) => t.includes('Essen')));
+  await page.click('.fab');
+  await sleep(350);
+  await page.click('.sheet .seg button:nth-child(2)');
+  check('Einnahme: keine Töpfe', await page.$eval('.sheet .chips', (c) => c.hidden));
+  await page.keyboard.press('Escape');
+  await sleep(400);
+  await shot('14-toepfe');
+
+  // Filter
+  await page.evaluate(() => [...document.querySelectorAll('.pot-btn')].find((x) => x.textContent.includes('Essen')).click());
+  await sleep(400);
+  await page.evaluate(() => [...document.querySelectorAll('.sheet .btn.plain')].find((b) => b.textContent.startsWith('Nur')).click());
+  await sleep(500);
+  check('Filter zeigt nur Essen', (await page.$$('.row')).length === 1 && (await text('.filter')).includes('Essen'));
+  await page.click('.filter button');
+  check('Filter aufheben', (await page.$$('.row')).length > 1);
+
+  // Betrag ändern
+  await page.evaluate(() => [...document.querySelectorAll('.pot-btn')].find((x) => x.textContent.includes('Essen')).click());
+  await sleep(400);
+  await tapKeys('<<<<<500');
+  await page.click('.sheet .btn.primary');
+  await sleep(450);
+  check('Topf-Betrag geändert', (await potRow('Essen')) === '465.40 / 500.00', String(await potRow('Essen')));
+
+  // Löschen: mit Buchung → bleibt diesen Monat als «gelöscht»
+  await page.evaluate(() => [...document.querySelectorAll('.pot-btn')].find((x) => x.textContent.includes('Essen')).click());
+  await sleep(400);
+  await page.click('.sheet .btn.danger-text');
+  await sleep(500);
+  check('Gelöschter Topf mit Buchungen bleibt sichtbar', (await page.$$eval('.pot-name', (n) => n.map((x) => x.textContent))).includes('Essen (gelöscht)'));
+  await page.click('.fab');
+  await sleep(350);
+  check('… aber nicht mehr beim Erfassen', !(await page.$$eval('.sheet .chip', (c) => c.map((x) => x.textContent))).includes('Essen'));
+  await page.keyboard.press('Escape');
+  await sleep(400);
+  await page.reload();
+  await page.waitForSelector('.available');
+  check('Töpfe bleiben nach Neuladen', (await potRow('Freizeit')) === '10.00 / 10.00');
 
   const ios = await browser.newPage();
   await ios.setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Mobile/15E148 Safari/604.1');

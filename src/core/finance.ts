@@ -9,7 +9,7 @@ export const EARLIEST: Month = '2000-01';
  * Liegt der Monat vor dem ersten Budget, gilt das erste Budget
  * («ein Monat ist nie ohne Budget»). Ohne jedes Budget: null.
  */
-export function budgetFor(budgets: readonly Budget[], month: Month): number | null {
+export function budgetFor(budgets: readonly Pick<Budget, 'from' | 'amount'>[], month: Month): number | null {
   if (budgets.length === 0) return null;
   const sorted = [...budgets].sort((a, b) => a.from.localeCompare(b.from));
   let result = sorted[0]!.amount;
@@ -21,15 +21,15 @@ export function budgetFor(budgets: readonly Budget[], month: Month): number | nu
 }
 
 /** Budget ab einem Monat setzen. Frühere Monate behalten ihr Budget. */
-export function setBudget(budgets: readonly Budget[], from: Month, amount: number): Budget[] {
+export function setBudget<T extends Budget>(budgets: readonly T[], from: Month, amount: number, make: (b: Budget) => T = (b) => b as T): T[] {
   if (!Number.isInteger(amount) || amount < 0) throw new RangeError('Budget muss ≥ 0 Rappen sein');
   const rest = budgets.filter((b) => b.from < from);
   // Gab es vor diesem Monat noch keinen Eintrag, galt dort stillschweigend das erste
   // Budget. Damit frühere Monate es behalten, wird es ab Anfang festgehalten.
   const sorted = [...budgets].sort((a, b) => a.from.localeCompare(b.from));
   const first = sorted[0];
-  if (rest.length === 0 && first && first.amount !== amount) rest.push({ from: EARLIEST, amount: first.amount });
-  const next = [...rest, { from, amount }].sort((a, b) => a.from.localeCompare(b.from));
+  if (rest.length === 0 && first && first.amount !== amount) rest.push(make({ from: EARLIEST, amount: first.amount }));
+  const next = [...rest, make({ from, amount })].sort((a, b) => a.from.localeCompare(b.from));
   // Ein gleich hohes Budget direkt danach ist überflüssig
   return next.filter((b, i) => i === 0 || b.amount !== next[i - 1]!.amount);
 }

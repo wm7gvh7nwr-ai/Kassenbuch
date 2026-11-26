@@ -17,7 +17,7 @@ export interface SettingsContext {
   onClear: () => Promise<void>;
 }
 
-const VERSION = '1.0';
+const VERSION = '1.1';
 
 function yearDate(d: string): string {
   return `${shortDate(d)} ${d.slice(0, 4)}`;
@@ -65,7 +65,7 @@ export function openSettings(ctx: SettingsContext): void {
 async function exportCsv(ctx: SettingsContext): Promise<void> {
   const data = ctx.data();
   if (data.entries.length === 0) return toast('Noch keine Buchungen');
-  const r = await shareFile(toCsv(data.entries), `kassenbuch-${today()}.csv`, 'text/csv');
+  const r = await shareFile(toCsv(data.entries, data.pots), `kassenbuch-${today()}.csv`, 'text/csv');
   if (r !== 'cancelled') toast('CSV exportiert');
 }
 
@@ -90,7 +90,7 @@ async function importBackup(ctx: SettingsContext): Promise<void> {
       ),
       h('p', { class: 'lead' },
         current
-          ? `Die ${current} Buchungen auf diesem Gerät und das Budget werden durch das Backup ersetzt.`
+          ? `Die ${current} Buchungen auf diesem Gerät, das Budget und die Töpfe werden durch das Backup ersetzt.`
           : 'Die Daten aus dem Backup werden übernommen.'),
       h('button', {
         class: 'btn primary block', type: 'button',
@@ -120,7 +120,7 @@ function confirmClear(ctx: SettingsContext): void {
     });
     body.append(
       h('p', { class: 'lead' },
-        `${n} Buchungen und das Monatsbudget werden von diesem Gerät gelöscht. Das lässt sich nicht rückgängig machen.`),
+        `${n} Buchungen, das Monatsbudget und die Töpfe werden von diesem Gerät gelöscht. Das lässt sich nicht rückgängig machen.`),
       h('button', { class: 'btn plain block', type: 'button', onclick: () => void makeBackup(ctx) }, 'Vorher Backup erstellen'),
       h('div', { class: 'check' }, check, h('label', { for: 'clear-ok' }, 'Ich habe ein Backup oder brauche die Daten nicht mehr.')),
       del,

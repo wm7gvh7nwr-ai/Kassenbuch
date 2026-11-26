@@ -1,10 +1,10 @@
-import type { Budget, Data, Entry } from '../core/model';
+import type { Budget, Data, Entry, Pot, PotBudget } from '../core/model';
 import { SCHEMA_VERSION } from '../core/model';
 
 /**
  * Dünne Hülle um IndexedDB. Alles bleibt im Gerät.
  * Store «entries»: eine Buchung pro Eintrag (Schlüssel = id).
- * Store «meta»: budgets, schemaVersion, lastBackupAt.
+ * Store «meta»: budgets, pots, potBudgets, schemaVersion, lastBackupAt.
  */
 const DB_NAME = 'kassenbuch';
 const DB_VERSION = 1;
@@ -50,12 +50,16 @@ function result<T>(req: IDBRequest<T>): Promise<T> {
 export async function loadAll(): Promise<Data & Meta> {
   const db = await open();
   const tx = db.transaction(['entries', 'meta'], 'readonly');
-  const [entries, budgets, lastBackupAt] = await Promise.all([
+  const meta = tx.objectStore('meta');
+  const [entries, budgets, pots, potBudgets, lastBackupAt] = await Promise.all([
     result(tx.objectStore('entries').getAll() as IDBRequest<Entry[]>),
-    result(tx.objectStore('meta').get('budgets') as IDBRequest<Budget[] | undefined>),
-    result(tx.objectStore('meta').get('lastBackupAt') as IDBRequest<string | undefined>),
+    result(meta.get('budgets') as IDBRequest<Budget[] | undefined>),
+    result(meta.get('pots') as IDBRequest<Pot[] | undefined>),
+    result(meta.get('potBudgets') as IDBRequest<PotBudget[] | undefined>),
+    result(meta.get('lastBackupAt') as IDBRequest<string | undefined>),
   ]);
-  return { entries, budgets: budgets ?? [], lastBackupAt: lastBackupAt ?? null };
+  // Daten aus Version 1 haben keine Töpfe: leer beginnen, Buchungen bleiben unverändert
+  return { entries, budgets: budgets ?? [], pots: pots ?? [], potBudgets: potBudgets ?? [], lastBackupAt: lastBackupAt ?? null };
 }
 
 export async function putEntry(entry: Entry): Promise<void> {
@@ -80,6 +84,15 @@ export async function saveBudgets(budgets: Budget[]): Promise<void> {
   await done(tx);
 }
 
+export async function savePots(pots: Pot[], potBudgets: PotBudget[]): Promise<void> {
+  const db = await open();
+  const tx = db.transaction('meta', 'readwrite');
+  tx.objectStore('meta').put(pots, 'pots');
+  tx.objectStore('meta').put(potBudgets, 'potBudgets');
+  tx.objectStore('meta').put(SCHEMA_VERSION, 'schemaVersion');
+  await done(tx);
+}
+
 export async function setLastBackup(iso: string): Promise<void> {
   const db = await open();
   const tx = db.transaction('meta', 'readwrite');
@@ -95,6 +108,8 @@ export async function replaceAll(data: Data): Promise<void> {
   store.clear();
   for (const e of data.entries) store.put(e);
   tx.objectStore('meta').put(data.budgets, 'budgets');
+  tx.objectStore('meta').put(data.pots, 'pots');
+  tx.objectStore('meta').put(data.potBudgets, 'potBudgets');
   tx.objectStore('meta').put(SCHEMA_VERSION, 'schemaVersion');
   await done(tx);
 }
