@@ -144,3 +144,19 @@ export function parseBackup(text: string): ParseResult {
 function fail(error: string): ParseResult {
   return { ok: false, error };
 }
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+export const BACKUP_INTERVAL_DAYS = 30;
+
+/**
+ * Ist ein Backup fällig? Ja, wenn es Buchungen gibt und das letzte Backup
+ * (oder, ohne Backup, die älteste Buchung) mehr als 30 Tage zurückliegt.
+ */
+export function backupDue(lastBackupAt: string | null, entries: readonly Entry[], now: Date): boolean {
+  if (entries.length === 0) return false;
+  let since: number;
+  if (lastBackupAt) since = Date.parse(lastBackupAt);
+  else since = Math.min(...entries.map((e) => Date.parse(e.createdAt)));
+  if (!Number.isFinite(since)) return true;
+  return now.getTime() - since > BACKUP_INTERVAL_DAYS * DAY_MS;
+}

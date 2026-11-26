@@ -2,6 +2,9 @@
 // Aufruf: npm run build && node scripts/ui-smoke.mjs
 import { spawn } from 'node:child_process';
 import puppeteer from 'puppeteer-core';
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const PORT = 4179;
 const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', 'preview', '--port', String(PORT), '--strictPort'], { stdio: 'pipe' });
@@ -146,6 +149,86 @@ try {
   await sleep(450);
   check('Notiz wird als Text angezeigt', (await page.$$('.row-title img')).length === 0 && (await text('.row-title')).startsWith('<img'));
   await shot('07-liste');
+
+  // ---- Etappe 3: Backup, CSV, Löschen, Einlesen ----
+  const dl = mkdtempSync(join(tmpdir(), 'kb-dl-'));
+  const cdp = await page.createCDPSession();
+  await cdp.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: dl });
+  const openSettings = async () => {
+    await page.click('.topbar .icon-btn[aria-label="Einstellungen"]');
+    await sleep(400);
+  };
+  const clickItem = async (label) => {
+    await page.evaluate((l) => [...document.querySelectorAll('.sheet .list-btn')].find((b) => b.textContent.startsWith(l)).click(), label);
+    await sleep(500);
+  };
+  const waitFile = async (ext) => {
+    for (let i = 0; i < 40; i++) {
+      const f = readdirSync(dl).find((n) => n.endsWith(ext));
+      if (f) return join(dl, f);
+      await sleep(100);
+    }
+    return null;
+  };
+  await openSettings();
+  check('Noch nie gesichert', (await page.$eval('.sheet .list-btn:nth-child(1)', () => document.querySelectorAll('.sheet .list-group')[1].textContent)).includes('Noch nie'));
+  await shot('08-einstellungen');
+  await clickItem('Backup erstellen');
+  const backupPath = await waitFile('.json');
+  const backup = backupPath && JSON.parse(readFileSync(backupPath, 'utf8'));
+  check('Backup-Datei erstellt', backup?.app === 'kassenbuch' && backup.entries.length === 5, backupPath ?? 'keine Datei');
+  await openSettings();
+  await clickItem('Als CSV exportieren');
+  const csvPath = await waitFile('.csv');
+  const csv = csvPath && readFileSync(csvPath, 'utf8');
+  check('CSV exportiert', !!csv && csv.includes('Datum;Betrag CHF;Art;Notiz') && csv.includes("'<img") === false && csv.includes('-1300.00'), csvPath ?? '');
+  page.keyboard.press('Escape');
+  await sleep(400);
+
+  // Alles löschen
+  await openSettings();
+  await clickItem('Alle Daten löschen');
+  check('Löschen gesperrt bis bestätigt', await page.$eval('.sheet .btn.danger', (b) => b.disabled));
+  await page.click('.sheet .check label');
+  check('Häkchen gibt Löschen frei', !(await page.$eval('.sheet .btn.danger', (b) => b.disabled)));
+  await page.click('.sheet .btn.danger');
+  await sleep(700);
+  check('Nach Löschen: Willkommen', (await text('.sheet h2')) === 'Willkommen');
+  await page.keyboard.press('Escape');
+  await sleep(400);
+  check('Liste leer', (await page.$$('.row')).length === 0);
+
+  // Kaputte Datei wird abgelehnt
+  const badPath = join(dl, 'kaputt.json');
+  writeFileSync(badPath, JSON.stringify({ ...backup, entries: [{ ...backup.entries[0], amount: 12.5 }] }));
+  await openSettings();
+  let [chooser] = await Promise.all([page.waitForFileChooser(), clickItem('Backup einlesen')]);
+  await chooser.accept([badPath]);
+  await sleep(500);
+  check('Kaputte Datei abgelehnt', (await text('.toast')).includes('Betrag') && (await page.$$('.row')).length === 0, await text('.toast'));
+
+  // Altes Backup einlesen → Erinnerung erscheint
+  const oldPath = join(dl, 'alt.json');
+  writeFileSync(oldPath, JSON.stringify({ ...backup, entries: backup.entries.map((e) => ({ ...e, createdAt: '2026-01-05T10:00:00.000Z' })) }));
+  await page.keyboard.press('Escape');
+  await sleep(400);
+  await openSettings();
+  [chooser] = await Promise.all([page.waitForFileChooser(), clickItem('Backup einlesen')]);
+  await chooser.accept([oldPath]);
+  await sleep(600);
+  check('Vorschau zeigt Anzahl', (await text('.sheet .big-line')) === '5 Buchungen');
+  await shot('09-einlesen');
+  await page.click('.sheet .btn.primary');
+  await sleep(600);
+  check('Eingelesen', (await text('.available')) === 'CHF 686.50' && (await page.$$('.row')).length === 4, await text('.available'));
+  check('Backup-Erinnerung erscheint', !!(await page.$('.banner')));
+  await shot('10-erinnerung');
+  await page.click('.banner .btn');
+  await sleep(600);
+  check('Erinnerung weg nach Backup', !(await page.$('.banner')));
+  await page.reload();
+  await page.waitForSelector('.available');
+  check('Backup-Datum bleibt gespeichert', !(await page.$('.banner')));
 
   check('Keine Fehler im Browser', errors.length === 0, errors.join(' | '));
 } finally {

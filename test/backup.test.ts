@@ -125,3 +125,25 @@ describe('CSV-Export', () => {
     expect(csv).toContain(';-12.50;'); // Zahlen bleiben Zahlen
   });
 });
+
+import { backupDue } from '../src/core/backup';
+
+describe('Backup-Erinnerung', () => {
+  const at = (iso: string) => entry({ createdAt: iso, updatedAt: iso });
+  const now = new Date('2026-11-26T12:00:00.000Z');
+
+  it('ohne Buchungen nie', () => {
+    expect(backupDue(null, [], now)).toBe(false);
+  });
+  it('nach dem letzten Backup erst nach 30 Tagen', () => {
+    expect(backupDue('2026-10-28T12:00:00.000Z', [at('2026-01-01T00:00:00.000Z')], now)).toBe(false); // 29 Tage
+    expect(backupDue('2026-10-27T11:00:00.000Z', [at('2026-01-01T00:00:00.000Z')], now)).toBe(true); // > 30 Tage
+  });
+  it('noch nie ein Backup: ab 30 Tage nach der ältesten Buchung', () => {
+    expect(backupDue(null, [at('2026-11-20T00:00:00.000Z')], now)).toBe(false);
+    expect(backupDue(null, [at('2026-11-20T00:00:00.000Z'), at('2026-10-01T00:00:00.000Z')], now)).toBe(true);
+  });
+  it('kaputter Zeitstempel: lieber erinnern', () => {
+    expect(backupDue('kaputt', [at('2026-11-20T00:00:00.000Z')], now)).toBe(true);
+  });
+});

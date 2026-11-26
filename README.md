@@ -25,5 +25,5 @@ npm run build   # statische Dateien in dist/
 
 - Etappe 1: Rechenkern und Tests ✓
 - Etappe 2: Startbildschirm und Erfassen ✓
-- Etappe 3: Einstellungen, Backup, CSV
+- Etappe 3: Einstellungen, Backup, CSV ✓
 - Etappe 4: Offline und Veröffentlichen (GitHub Pages)

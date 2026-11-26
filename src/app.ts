@@ -6,7 +6,9 @@ import * as db from './storage/db';
 import { openBudgetSheet } from './ui/budgetSheet';
 import { append, clear, h, icon, ICONS } from './ui/dom';
 import { openEntrySheet } from './ui/entrySheet';
-import { openSheet, toast } from './ui/sheet';
+import { toast } from './ui/sheet';
+import { makeBackup, openSettings } from './ui/settings';
+import { backupDue } from './core/backup';
 
 interface State {
   entries: Entry[];
@@ -93,18 +95,33 @@ export async function startApp(root: HTMLElement): Promise<void> {
     });
   }
 
-  function openSettings(): void {
-    openSheet('Einstellungen', (body, close) => {
-      const budget = budgetFor(state.budgets, currentMonth());
-      body.append(
-        h('div', { class: 'list-group' },
-          h('button', { class: 'list-btn', type: 'button', onclick: () => (close(), editBudget()) },
-            h('span', null, 'Monatsbudget'),
-            h('span', { class: 'muted' }, budget === null ? 'nicht gesetzt' : `CHF ${formatChf(budget)}`),
-          ),
-        ),
-        h('p', { class: 'hint' }, 'Backup, Export und Löschen folgen in der nächsten Version.'),
-      );
+  function showSettings(): void {
+    openSettings({
+      data: () => ({ entries: state.entries, budgets: state.budgets }),
+      budget: budgetFor(state.budgets, currentMonth()),
+      lastBackupAt: state.lastBackupAt,
+      editBudget: () => editBudget(),
+      onBackupDone: async (iso) => {
+        await db.setLastBackup(iso);
+        state.lastBackupAt = iso;
+        render();
+      },
+      onReplace: async (data) => {
+        await db.replaceAll(data);
+        state.entries = data.entries;
+        state.budgets = data.budgets;
+        state.month = currentMonth();
+        render();
+      },
+      onClear: async () => {
+        await db.clearAll();
+        state.entries = [];
+        state.budgets = [];
+        state.lastBackupAt = null;
+        state.month = currentMonth();
+        render();
+        editBudget(true);
+      },
     });
   }
 
@@ -184,8 +201,14 @@ export async function startApp(root: HTMLElement): Promise<void> {
         h('button', { class: 'month', type: 'button', 'aria-label': 'Zum aktuellen Monat', onclick: () => ((state.month = currentMonth()), render()) }, monthLabel(state.month)),
         h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Nächster Monat', disabled: isCurrent, onclick: () => ((state.month = addMonths(state.month, 1)), render()) }, icon(ICONS.forward)),
         h('span', { class: 'grow' }),
-        h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Einstellungen', onclick: openSettings }, icon(ICONS.gear)),
+        h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Einstellungen', onclick: showSettings }, icon(ICONS.gear)),
       ),
+      backupDue(state.lastBackupAt, state.entries, new Date()) && h('div', { class: 'banner', role: 'note' },
+        h('span', null, h('strong', null, 'Backup fällig'), h('br'), state.lastBackupAt ? 'Das letzte ist über 30 Tage alt.' : 'Sichere deine Buchungen in «Dateien».'),
+        h('button', { class: 'btn small', type: 'button', onclick: () => void makeBackup({
+          data: () => ({ entries: state.entries, budgets: state.budgets }),
+          onBackupDone: async (iso) => { await db.setLastBackup(iso); state.lastBackupAt = iso; render(); },
+        }) }, 'Jetzt sichern')),
       h('section', { class: `hero ${s.level}`, 'aria-label': 'Verfügbar' },
         h('p', { class: 'label' }, isCurrent ? 'Noch verfügbar' : `Übrig im ${monthName(state.month)}`),
         hasBudget

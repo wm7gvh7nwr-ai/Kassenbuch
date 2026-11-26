@@ -82,7 +82,9 @@ let toastTimer: ReturnType<typeof setTimeout> | undefined;
 export function toast(message: string, action?: { label: string; run: () => void }, ms = 3000): void {
   document.querySelector('.toast')?.remove();
   clearTimeout(toastTimer);
-  const el = h('div', { class: 'toast', role: 'status' }, h('span', null, message));
+  // Ist ein Blatt offen, erscheint die Meldung oben, damit sie keine Knöpfe verdeckt
+  const top = document.querySelector('.sheet-root.open') !== null;
+  const el = h('div', { class: top ? 'toast top' : 'toast', role: 'status' }, h('span', null, message));
   if (action) {
     el.append(
       h('button', {
